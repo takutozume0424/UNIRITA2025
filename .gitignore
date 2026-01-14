@@ -1,0 +1,24 @@
+# Env
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual Env
+venv/
+.venv/
+env/
+
+# Lint / Tool
+.ruff_cache/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backup
+BK/
