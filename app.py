@@ -22,7 +22,12 @@ import streamlit as st
 from openai import OpenAI
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 import json
-from functions import file_search, extract_text_from_docx
+from functions import (
+    file_search,
+    extract_text_from_docx,
+    extract_text_from_excel,
+    extract_text_from_pdf,
+    )
 from dotenv import load_dotenv
 import os
 
@@ -60,7 +65,37 @@ tools = [
     {
         "type": "function",
         "name": "extract_text_from_docx",
-        "description": "ファイルの中身を取得します",
+        "description": "Wordファイルの中身を取得します",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "中身をみたいファイルのファイルパス",
+                },
+            },
+            "required": ["file_path"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "extract_text_from_excel",
+        "description": "Excelファイルの中身を取得します",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "中身をみたいファイルのファイルパス",
+                },
+            },
+            "required": ["file_path"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "extract_text_from_pdf",
+        "description": "PDFファイルの中身を取得します",
         "parameters": {
             "type": "object",
             "properties": {
@@ -94,6 +129,7 @@ for message in st.session_state.messages:
 # 公式ドキュメント：
 # https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/responses?view=foundry-classic&tabs=python-secure
 if prompt := st.chat_input("メッセージを入力してください"):
+    print("-----     app start     -----")
     # ユーザーの発言を表示
     with st.chat_message("user"):
         st.markdown(prompt)
@@ -127,25 +163,36 @@ if prompt := st.chat_input("メッセージを入力してください"):
         tool_choice="auto",
     )
 
-    print(
-        json.dumps(
-            response.model_dump(),
-            ensure_ascii=False,
-            indent=2,
-        )
-    )
-
-    response_message = response.output
-    wk_messages += response_message
+    # print(
+    #     json.dumps(
+    #         response.model_dump(),
+    #         ensure_ascii=False,
+    #         indent=2,
+    #     )
+    # )
 
     func_flg = 0
+    func_count = 0
 
     # 参考リンク：
     # https://platform.openai.com/docs/guides/function-calling
     # https://zenn.dev/headwaters/articles/13316d641c9555
     # aiの返答を受け、使う関数があるかチェック⇒あったら関数を呼び出す
-    for item in response_message:
-        if item.type == "function_call":
+    while func_count < 5:
+
+        response_message = response.output
+        wk_messages += response_message
+        function_calls =[]
+
+        for item in response_message:
+            if item.type == "function_call":
+                function_calls.append(item)
+
+        if not function_calls:
+            break
+
+        for item in function_calls:
+
             function_name = item.name
             function_args = json.loads(item.arguments)
             print(f"Function call: {function_name}")
@@ -155,29 +202,45 @@ if prompt := st.chat_input("メッセージを入力してください"):
                     search_root=function_args.get("file_path"),
                     keyword=function_args.get("keyword"),
                 )
-                func_flg = 1
-                wk_messages.append(
-                    {
-                        "type": "function_call_output",
-                        "call_id": item.call_id,
-                        "output": json.dumps(function_response, ensure_ascii=False),
-                    }
-                )
-
             elif function_name == "extract_text_from_docx":
                 function_response = extract_text_from_docx(
                     file_path=function_args.get("file_path")
                 )
-                func_flg = 1
-                wk_messages.append(
-                    {
-                        "type": "function_call_output",
-                        "call_id": item.call_id,
-                        "output": json.dumps(function_response, ensure_ascii=False),
-                    }
+            elif function_name == "extract_text_from_excel":
+                function_response = extract_text_from_excel(
+                    file_path=function_args.get("file_path"),
                 )
+            elif function_name == "extract_text_from_pdf":
+                function_response = extract_text_from_pdf(
+                    file_path=function_args.get("file_path")
+                )
+            wk_messages.append(
+                {
+                    "type": "function_call_output",
+                    "call_id": item.call_id,
+                    "output": json.dumps(function_response, ensure_ascii=False),
+                }
+            )
 
+        # 次のAI呼び出し
+        response = client.responses.create(
+            instructions="検索結果や抽出されたテキストに基づいて、ユーザーに分かりやすく回答してください。",
+            model=deployment_name,
+            input=wk_messages,
+            tools=tools,
+            tool_choice="auto",
+        )
+
+        func_count += 1
+
+    print(
+        f"""wk_message:{
+            wk_messages
+        }
+        """
+    )
     # 関数を呼び出した場合に、再度aiを呼び出す（このときにwk_messageを利用）
+    print(func_flg)
     if func_flg == 1:
         final_response = client.responses.create(
             instructions="検索結果や抽出されたテキストに基づいて、ユーザーに分かりやすく回答してください。",
@@ -189,11 +252,10 @@ if prompt := st.chat_input("メッセージを入力してください"):
         final_response = response
 
     print(
-        json.dumps(
-            final_response.model_dump(),
-            ensure_ascii=False,
-            indent=2,
-        )
+        f"""final_response:{
+            final_response.output
+        }
+        """
     )
 
     for item in final_response.output:
@@ -213,3 +275,5 @@ if prompt := st.chat_input("メッセージを入力してください"):
             "content": response_text,
         }
     )
+
+    print("-----     app end       -----")
