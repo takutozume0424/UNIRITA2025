@@ -28,6 +28,11 @@ from functions import (
     extract_text_from_excel,
     extract_text_from_pdf,
     )
+from const import tools
+from chat_service import (
+    chat,
+    re_chat,
+)
 from dotenv import load_dotenv
 import os
 
@@ -41,73 +46,6 @@ token_provider = get_bearer_token_provider(
     DefaultAzureCredential(), "https://cognitiveservices.azure.com/.default"
 )
 
-
-tools = [
-    {
-        "type": "function",
-        "name": "file_search",
-        "description": "ファイルの格納先を検索します",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "keyword": {
-                    "type": "string",
-                    "description": "検索したいファイルに関連のあるキーワード",
-                },
-                "file_path": {
-                    "type": "string",
-                    "description": "検索したいファイルパス",
-                },
-            },
-            "required": ["keyword", "file_path"],
-        },
-    },
-    {
-        "type": "function",
-        "name": "extract_text_from_docx",
-        "description": "Wordファイルの中身を取得します",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "file_path": {
-                    "type": "string",
-                    "description": "中身をみたいファイルのファイルパス",
-                },
-            },
-            "required": ["file_path"],
-        },
-    },
-    {
-        "type": "function",
-        "name": "extract_text_from_excel",
-        "description": "Excelファイルの中身を取得します",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "file_path": {
-                    "type": "string",
-                    "description": "中身をみたいファイルのファイルパス",
-                },
-            },
-            "required": ["file_path"],
-        },
-    },
-    {
-        "type": "function",
-        "name": "extract_text_from_pdf",
-        "description": "PDFファイルの中身を取得します",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "file_path": {
-                    "type": "string",
-                    "description": "中身をみたいファイルのファイルパス",
-                },
-            },
-            "required": ["file_path"],
-        },
-    },
-]
 
 # Entra ID を使用してクライアントを作成し認証する
 client = OpenAI(base_url=endpoint, api_key=token_provider())
@@ -156,12 +94,21 @@ if prompt := st.chat_input("メッセージを入力してください"):
     # ’組み込みツールや複数のモデル呼び出しに依存しない新しいモデルは、Chat Completionsにもリリースされる予定です。
     # 一方、エージェントワークフロー向けに特別に設計された機能については、Responses APIが推奨されています。’
     # 参考URL：https://qiita.com/Tadataka_Takahashi/items/8678970abd324122085c
-    response = client.responses.create(
-        model=deployment_name,
-        input=st.session_state.messages,
-        tools=tools,
-        tool_choice="auto",
+
+    print(
+        f"""messages:{
+            st.session_state.messages
+        }
+        """
     )
+
+    response = chat(
+        client=client,
+        deployment_name=deployment_name,
+        messages=st.session_state.messages,
+        tools=tools,
+    )
+
 
     # print(
     #     json.dumps(
@@ -223,42 +170,30 @@ if prompt := st.chat_input("メッセージを入力してください"):
             )
 
         # 次のAI呼び出し
-        response = client.responses.create(
-            instructions="検索結果や抽出されたテキストに基づいて、ユーザーに分かりやすく回答してください。",
-            model=deployment_name,
-            input=wk_messages,
+        response = re_chat(
+            client=client,
+            deployment_name=deployment_name,
+            messages=wk_messages,
             tools=tools,
-            tool_choice="auto",
         )
 
         func_count += 1
 
-    print(
-        f"""wk_message:{
-            wk_messages
-        }
-        """
-    )
-    # 関数を呼び出した場合に、再度aiを呼び出す（このときにwk_messageを利用）
-    print(func_flg)
-    if func_flg == 1:
-        final_response = client.responses.create(
-            instructions="検索結果や抽出されたテキストに基づいて、ユーザーに分かりやすく回答してください。",
-            tools=tools,
-            model=deployment_name,
-            input=wk_messages,
-        )
-    else:
-        final_response = response
+    # print(
+    #     f"""wk_message:{
+    #         wk_messages
+    #     }
+    #     """
+    # )
 
     print(
         f"""final_response:{
-            final_response.output
+            response.output
         }
         """
     )
 
-    for item in final_response.output:
+    for item in response.output:
         # itemの中に 'content' があり、さらにその中にテキストがあったら
         if hasattr(item, "content") and item.content is not None:
             # response_textにテキストを格納する

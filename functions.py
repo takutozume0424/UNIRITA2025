@@ -5,10 +5,16 @@ import pythoncom
 from openpyxl import load_workbook
 from pypdf import PdfReader
 import xlrd
+import json
+
+def save_log(data):
+    with open("chat_log.jsonl", "a", encoding="utf-8") as f:
+        f.write(json.dumps(data, ensure_ascii=False) + "\n")
+
 
 def file_search(search_root, keyword):
     """
-    Windows Search APIを使用してファイルを検索する
+    Windows Search APIを使用してローカルファイルを検索する
     :param search_root: 検索対象のフォルダパス (例: C:\\Documents)
     :param keyword: 検索したいキーワード (中身も検索対象)
     :return: 検索結果のリスト
@@ -92,6 +98,73 @@ def file_search(search_root, keyword):
 
     return results
 
+def file_search_server(search_root, keyword):
+    """
+    ファイルサーバ（UNC含む）対応の全文検索
+    :param search_root: 例 r"\\server\\share\\folder"
+    :param keyword: 検索キーワード
+    :return: 検索結果リスト
+    """
+
+    print("----- file_search (file server mode) start -----")
+    print(f"検索対象: {search_root}")
+    print(f"キーワード: {keyword}")
+
+    results = []
+
+    for root, _, files in os.walk(search_root):
+        """
+        root  : 現在のフォルダ
+        _     : サブフォルダ
+        files : フォルダ内のファイル
+        """
+        for filename in files:
+            path = os.path.join(root, filename)
+
+            try:
+                # ① ファイル名検索
+                hit_name = keyword.lower() in filename.lower()
+
+                # ② 中身検索
+
+                hit_content = False
+                text = ""
+
+                # 拡張子をextに格納
+                ext = os.path.splitext(filename)[1].lower()
+
+                if ext == ".docx":
+                    text = extract_text_from_docx(path)
+                elif ext == ".xlsx" or ext== ".xls":
+                    text = extract_text_from_excel(path)
+                elif ext == ".pdf":
+                    text = extract_text_from_pdf(path)
+
+                if keyword.lower() in text.lower():
+                    hit_content = True
+
+                if hit_name or hit_content:
+                    stat = os.stat(path)
+                    results.append(
+                        {
+                            "Path": path,
+                            "FileName": filename,
+                            "Size": stat.st_size,
+                            "LastModified": str(
+                                stat.st_mtime
+                            ),
+                        }
+                    )
+
+            except Exception as e:
+                # アクセス拒否・壊れたファイル対策
+                print(f"スキップ: {path} ({e})")
+
+    print("----- file_search end -----")
+    return results
+
+
+
 
 def extract_text_from_docx(file_path):
     """
@@ -108,7 +181,7 @@ def extract_text_from_docx(file_path):
     print(f"DEBUG: Searching for -> {normalized_path}")
 
     if not os.path.exists(normalized_path):
-        return f"エラー: ファイルが物理的に存在しません。OneDriveの同期を確認してください。({normalized_path})"
+        return f"エラー: ファイルが物理的に存在しません。({normalized_path})"
 
     try:
         # Wordドキュメントを読み込む
@@ -149,7 +222,9 @@ def extract_text_from_excel(file_path):
     print(f"DEBUG: Searching for -> {normalized_path}")
 
     if not os.path.exists(normalized_path):
-        return f"エラー: ファイルが物理的に存在しません。({normalized_path})"
+        print(f"エラー: ファイルが物理的に存在しません。({normalized_path})")
+        return ""
+
 
     ext = os.path.splitext(normalized_path)[1].lower()
     full_text = []
@@ -191,14 +266,16 @@ def extract_text_from_excel(file_path):
                         full_text.append(" ".join(row_values))
 
         else:
-            return f"未対応のファイル形式です: {ext}"
+            print(f"未対応のファイル形式です: {ext}")
+            return ""
 
         print("----- extract_text_from_excel end -----")
 
         return "\n".join(full_text)
 
     except Exception as e:
-        return f"エラー: Excel読み込み失敗 ({e})"
+        print( f"エラー: Excel読み込み失敗 ({e})")
+        return ""
 
 
 def extract_text_from_pdf(file_path):
@@ -216,7 +293,8 @@ def extract_text_from_pdf(file_path):
     print(f"DEBUG: Searching for -> {normalized_path}")
 
     if not os.path.exists(normalized_path):
-        return f"エラー: ファイルが物理的に存在しません。OneDriveの同期を確認してください。({normalized_path})"
+        print( f"エラー: ファイルが物理的に存在しません。({normalized_path})")
+        return ""
 
     try:
         # PDFファイルの読み込み
@@ -229,7 +307,8 @@ def extract_text_from_pdf(file_path):
                 full_text.append(f"【ページ {i + 1}】\n{text}")
 
         if not full_text:
-            return "（PDFからテキストを抽出できませんでした）"
+            print("（PDFからテキストを抽出できませんでした）")
+            return ""
 
 
         print("-----     extract_text_from_pdf end       -----")
@@ -237,4 +316,5 @@ def extract_text_from_pdf(file_path):
         return "\n\n".join(full_text)
 
     except Exception as e:
-        return f"エラー: {file_path} の読み込みに失敗しました ({e})"
+        print( f"エラー: {file_path} の読み込みに失敗しました ({e})")
+        return ""
