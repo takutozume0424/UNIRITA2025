@@ -66,3 +66,18 @@ tools = [
         },
     },
 ]
+
+
+INSERT_QUERY = """
+INSERT INTO chat_messages(
+conversation_id,
+role,
+content,
+token_count,
+model,
+input_tokens,
+output_tokens,
+total_tokens
+)
+VALUES(?,?,?,?,?,?,?,?)
+"""

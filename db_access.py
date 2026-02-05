@@ -1,16 +1,26 @@
 import pyodbc
 import struct
 from azure.identity import DefaultAzureCredential
+from const import INSERT_QUERY
 
-def test_connection():
-    print(pyodbc.drivers())
 
+def insert_conversation(
+    conversation_id,
+    role,
+    content,
+    token_count,
+    model,
+    input_tokens,
+    output_tokens,
+    total_tokens,
+):
     connection_string = (
         "DRIVER={ODBC Driver 18 for SQL Server};"
         "SERVER=unirita-study.database.windows.net;"
         "DATABASE=unirita;"
         "Encrypt=yes;"
         "TrustServerCertificate=no;"
+        "LoginTimeout=60;"
     )
 
     credential = DefaultAzureCredential(
@@ -30,17 +40,36 @@ def test_connection():
 
     SQL_COPT_SS_ACCESS_TOKEN = 1256
 
-    conn = pyodbc.connect(
-        connection_string,
-        attrs_before={SQL_COPT_SS_ACCESS_TOKEN: token_struct},
-        timeout=5
-    )
+    try:
+        with pyodbc.connect(
+            connection_string,
+            attrs_before={SQL_COPT_SS_ACCESS_TOKEN: token_struct},
+            timeout=5
+        ) as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    INSERT_QUERY,
+                    (
+                        conversation_id,
+                        role,
+                        content,
+                        token_count,
+                        model,
+                        input_tokens,
+                        output_tokens,
+                        total_tokens
+                    )
+                )
+                conn.commit()
+        return True
 
-    cursor = conn.cursor()
-    cursor.execute("SELECT 1")
-    print("接続成功:", cursor.fetchone())
+    except Exception as e:
+        raise RuntimeError(f"DB登録失敗: {e}") from e
 
-    conn.close()
 
-if __name__ == "__main__":
-    test_connection()
+
+
+
+
+
+
